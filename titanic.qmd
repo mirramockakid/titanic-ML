@@ -1,0 +1,123 @@
+---
+title: "Titanic: predicting survival"
+format: html
+editor: visual
+---
+
+```{r, setup, results='hide', echo=FALSE}
+if(!require(tidymodels)){
+    install.packages("tidymodels")
+    library(tidymodels)
+}
+
+if(!require(ranger)){
+    install.packages("ranger")
+    library(ranger)
+}
+
+if(!require(readr)){
+    install.packages("readr")
+    library(readr)
+}
+```
+
+# Survived: 0 = No, 1 = Yes
+
+# Pcalss: 1 = 1st Class, etc
+
+# Name:
+
+# Sex:
+
+# Age:
+
+# SibSp: number of brothers, sisters, wife or husband on board
+
+# Parch: number of children OR parents on board
+
+# Ticket:
+
+# Fare:
+
+# Cabin:
+
+# Embarked: C = Cherbourg, Q = Queenstown, S = Southampton
+
+```{r, include=FALSE, message=FALSE}
+train <- read_csv("./data/titanic/train.csv")
+test  <- read_csv("./data/titanic/test.csv")
+
+# make outcome a characters 
+train <- train |>
+  mutate(Survived = if_else(Survived == 1, "survived", "died"))
+```
+
+Including steps that filter rows in the recipe (i.e. step_naomit or step_filter) are, by default not "baked" into other datasets. This is to stop predictors and outcome objects becoming out of sync. This can be overridden by setting `skip=FALSE` but this is generally not advised. Best practice is to filter rows outside of recipes - especially any datasets that are to be used for prediction.
+
+## Basic model with no tuning
+
+```{r,}
+# make recipe 
+rf_recipe <- recipe(Survived ~ Pclass + SibSp + Parch, x = train) |>
+  step_string2factor(Survived)
+
+# set model and any non-default parameters
+rf_model <- rand_forest(trees = 1000) |>
+  set_engine("ranger") |>
+  set_mode("classification")
+
+# add model and recipe to workflow
+rf_wfolw <- workflow() |>
+  add_model(rf_model) |>
+  add_recipe(rf_recipe)
+
+# setup CV
+rf_folds <- vfold_cv(train, v = 10)
+
+# describe what information should be saved with each CV
+keep_pred <- control_resamples(save_pred = TRUE, save_workflow = TRUE)
+
+# fit model for each resample
+rf_fit <- fit_resamples(rf_wfolw, resamples = rf_folds, control = keep_pred)
+
+# metrics for each fold
+collect_metrics(rf_fit, summarize = F)
+
+# metric summarised across folds
+collect_metrics(rf_fit, summarize = T)
+
+# similar can be done with predictions (class probability and class assignment)
+collect_predictions(rf_fit)
+```
+
+# Compare two models - given values of hyperperamaters
+
+```{r,}
+# make recipe (unchanged) 
+rf_recipe <- recipe(Survived ~ Pclass + SibSp + Parch, x = train) |>
+  step_string2factor(Survived)
+
+# 500 tree model
+rf_model_1 <- rand_forest(trees = c(500)) |>
+  set_engine("ranger") |>
+  set_mode("classification")
+
+# 1000 tree model
+rf_model_2 <- rand_forest(trees = c(1000)) |>
+  set_engine("ranger") |>
+  set_mode("classification")
+
+# add multiple recipes and/or models to a workflow set
+rf_wfolwset <- workflow_set(
+  preproc = list(rf_recipe), 
+  models = list("trees_500" = rf_model_1, "trees_1k" = rf_model_2),
+  cross = F)
+
+rf_model <- workflow_map(
+  object = rf_wfolwset, "fit_resamples", seed = 101, 
+  resamples = rf_folds, control = keep_pred)
+
+collect_metrics(rf_model)
+```
+
+
