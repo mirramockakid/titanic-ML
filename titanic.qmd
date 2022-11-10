@@ -19,6 +19,11 @@ if(!require(readr)){
     install.packages("readr")
     library(readr)
 }
+
+if(!require(doParallel)){
+    install.packages("doParallel")
+    library(doParallel)
+}
 ```
 
 # Survived: 0 = No, 1 = Yes
@@ -118,6 +123,52 @@ rf_model <- workflow_map(
   resamples = rf_folds, control = keep_pred)
 
 collect_metrics(rf_model)
+```
+
+# Hyperperameter tuning
+
+```{r,}
+# make recipe 
+rf_recipe <- recipe(Survived ~ Pclass + SibSp + Parch, x = train) |>
+  step_string2factor(Survived)
+
+# set model and any non-default parameters
+rf_model <- rand_forest(trees = tune()) |>
+  set_engine("ranger") |>
+  set_mode("classification")
+
+# add model and recipe to workflow
+rf_wfolw <- workflow() |>
+  add_model(rf_model) |>
+  add_recipe(rf_recipe)
+
+# setup CV
+rf_folds <- vfold_cv(train, v = 10)
+
+doParallel::registerDoParallel()
+
+set.seed(345)
+rf_tune <- tune_grid(
+  rf_wfolw,
+  resamples = rf_folds,
+  grid = 20
+)
+
+rf_tune |>
+  collect_metrics()
+
+# select best
+best_auc <- select_best(rf_tune, "roc_auc")
+
+# add the "best" value for tuned parameters to workflow
+rf_final <- finalize_workflow(
+  rf_wfolw,
+  best_auc
+)
+
+# fit "finalised" model training data
+rf_final |>
+  parsnip::fit(train)
 ```
 
 
