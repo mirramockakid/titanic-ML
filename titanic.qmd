@@ -113,6 +113,8 @@ rf_model_2 <- rand_forest(trees = c(1000)) |>
   set_mode("classification")
 
 # add multiple recipes and/or models to a workflow set
+# if multiple preprocessing and modelling objects are given
+# cross = T can be used to compare each pairwise combination
 rf_wfolwset <- workflow_set(
   preproc = list(rf_recipe), 
   models = list("trees_500" = rf_model_1, "trees_1k" = rf_model_2),
@@ -123,19 +125,50 @@ rf_model <- workflow_map(
   resamples = rf_folds, control = keep_pred)
 
 collect_metrics(rf_model)
+
+#OR
+
+collect_metrics(rf_model) |>
+  dplyr::filter(.metric == "roc_auc")
+
+# are the two models significantly different?
+# hypothesis testing is described on page 152 - 164.
+# the three bullet points on p158 described the different comparisons.
+# i.e. comparing different models vs comparing the same model while
+# tuning different hyperperameters
+
 ```
 
 # Hyperperameter tuning
-
 ```{r,}
+# show engines for method
+show_engines("rand_forest")
+
+# show parameters for method
+show_model_info("rand_forest")
+
 # make recipe 
 rf_recipe <- recipe(Survived ~ Pclass + SibSp + Parch, x = train) |>
   step_string2factor(Survived)
 
+# see all available tuneable hyperperameters
+# main hyper-perameters 
+tune_args(rand_forest(), full = T)
+# note there are also engine specific hyper-parameters
+
 # set model and any non-default parameters
-rf_model <- rand_forest(trees = tune()) |>
+rf_model <- rand_forest(trees = 1000, min_n = tune()) |>
   set_engine("ranger") |>
   set_mode("classification")
+# you can give the hyper-parameter to be tuned an id;
+# tune(id = "parameter_name")
+# useful when tuning lots of similar parameters
+
+# each parameter has it's own default value / range
+min_n() # [2, 40]
+
+# see what is to be tuned
+extract_parameter_set_dials(rf_model)
 
 # add model and recipe to workflow
 rf_wfolw <- workflow() |>
@@ -144,31 +177,33 @@ rf_wfolw <- workflow() |>
 
 # setup CV
 rf_folds <- vfold_cv(train, v = 10)
-
 doParallel::registerDoParallel()
-
 set.seed(345)
 rf_tune <- tune_grid(
   rf_wfolw,
   resamples = rf_folds,
-  grid = 20
+  grid = 20 
 )
+# note that supplying an integer value to grid = ""
+# will use a space filling design based on default
+# parameter ranges
+
+# diagnostic plots
+autoplot(rf_tune)
+
+# best single parameter (based on AUC)
+show_best(rf_tune, metric = "roc_auc", n = 1)
 
 rf_tune |>
   collect_metrics()
-
 # select best
 best_auc <- select_best(rf_tune, "roc_auc")
-
 # add the "best" value for tuned parameters to workflow
 rf_final <- finalize_workflow(
   rf_wfolw,
   best_auc
 )
-
 # fit "finalised" model training data
 rf_final |>
   parsnip::fit(train)
 ```
-
-
